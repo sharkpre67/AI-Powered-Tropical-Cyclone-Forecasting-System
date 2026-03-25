@@ -1,0 +1,581 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Hệ Thống Dự Báo Bão Tổng Hợp</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/remixicon@3.5.0/fonts/remixicon.css" rel="stylesheet">
+    
+    <style>
+        :root {
+            --primary: #1E293B;
+            --accent: #3B82F6;
+            --bg-body: #F8FAFC;
+            --bg-card: #FFFFFF;
+            --text-main: #334155;
+            --text-light: #64748B;
+            --radius: 12px;
+            --shadow: 0 4px 20px rgba(0,0,0,0.06);
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; font-family: 'Inter', sans-serif; }
+        body { background: var(--bg-body); color: var(--text-main); height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+
+        /* HEADER */
+        .top-bar {
+            height: 60px; background: var(--bg-card); display: flex; align-items: center; 
+            justify-content: space-between; padding: 0 24px; box-shadow: 0 1px 2px rgba(0,0,0,0.05); z-index: 100;
+        }
+        .logo h1 { font-size: 1.2rem; font-weight: 700; color: var(--primary); display: flex; align-items: center; gap: 10px; }
+        .status-bar { display: flex; gap: 15px; font-size: 0.8rem; font-weight: 500; }
+        .status-tag { display: flex; align-items: center; gap: 6px; background: #F1F5F9; padding: 4px 10px; border-radius: 20px; }
+        .dot { width: 8px; height: 8px; border-radius: 50%; background: #CBD5E1; }
+        .dot.active { background: #10B981; box-shadow: 0 0 0 2px rgba(16, 185, 129, 0.2); }
+
+        /* MAIN LAYOUT */
+        .layout { display: flex; height: calc(100vh - 60px); padding: 20px; gap: 20px; }
+        
+        /* MAP AREA */
+        .map-box { flex: 1; border-radius: var(--radius); overflow: hidden; position: relative; box-shadow: var(--shadow); background: #ddd; }
+        #map { width: 100%; height: 100%; z-index: 1; }
+
+        /* --- HISTORY PANEL (MỚI) --- */
+        .history-panel {
+            position: absolute; top: 20px; left: 20px; z-index: 1000;
+            width: 280px; background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(8px);
+            border-radius: var(--radius); box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+            display: flex; flex-direction: column; max-height: calc(100% - 40px);
+            transition: transform 0.3s ease; border: 1px solid rgba(0,0,0,0.1);
+        }
+        .history-panel.collapsed { transform: translateX(-300px); }
+        
+        .history-header {
+            padding: 12px 15px; background: #F1F5F9; border-bottom: 1px solid #E2E8F0;
+            border-radius: var(--radius) var(--radius) 0 0;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .history-title { font-weight: 700; color: var(--primary); font-size: 0.85rem; display: flex; align-items: center; gap: 6px; }
+        
+        .history-toggle {
+            position: absolute; top: 10px; right: -32px;
+            width: 32px; height: 32px; background: white;
+            border-radius: 0 8px 8px 0; box-shadow: 2px 2px 5px rgba(0,0,0,0.1);
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer; color: var(--primary); border: 1px solid rgba(0,0,0,0.1); border-left: none;
+        }
+
+        .history-list { flex: 1; overflow-y: auto; padding: 0; list-style: none; margin: 0; }
+        .history-item {
+            padding: 10px 15px; border-bottom: 1px solid #F1F5F9; cursor: pointer; transition: background 0.2s;
+        }
+        .history-item:hover { background: #F8FAFC; }
+        .history-item:last-child { border-bottom: none; }
+        
+        .h-row { display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; }
+        .h-prob { font-weight: 800; font-size: 0.9rem; }
+        .h-coords { font-size: 0.75rem; color: var(--text-light); display: flex; align-items: center; gap: 4px; }
+        .h-time { font-size: 0.7rem; color: #94A3B8; text-align: right; }
+
+        .prob-high { color: #EF4444; }
+        .prob-low { color: #10B981; }
+
+        /* RESULTS PANEL (Nổi) */
+        .float-panel {
+            position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%);
+            width: 90%; max-width: 800px; max-height: 40vh;
+            background: rgba(255, 255, 255, 0.96); backdrop-filter: blur(10px);
+            border-radius: var(--radius); padding: 20px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.15); z-index: 500;
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            border: 1px solid rgba(255,255,255,0.8);
+            display: none; 
+        }
+        .float-panel.show { display: block; animation: slideUp 0.3s ease-out; }
+        @keyframes slideUp { from { transform: translate(-50%, 20px); opacity: 0; } to { transform: translate(-50%, 0); opacity: 1; } }
+
+        /* SIDEBAR */
+        .sidebar {
+            width: 350px; min-width: 350px; background: var(--bg-card);
+            border-radius: var(--radius); box-shadow: var(--shadow);
+            display: flex; flex-direction: column; border: 1px solid #E2E8F0;
+        }
+        .sidebar-scroll { padding: 20px; overflow-y: auto; flex: 1; }
+
+        .section-title {
+            font-size: 0.8rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;
+            color: #94A3B8; margin-bottom: 12px; display: flex; align-items: center; gap: 6px;
+        }
+
+        /* INPUT STYLES */
+        .input-group { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px; }
+        .input-field { background: #F8FAFC; border: 1px solid #E2E8F0; padding: 10px; border-radius: 8px; }
+        .input-field label { display: block; font-size: 0.75rem; color: #64748B; margin-bottom: 4px; }
+        .input-field input, .input-field select { width: 100%; border: none; background: transparent; font-weight: 600; color: var(--primary); font-size: 0.95rem; outline: none; }
+
+        /* GFS DASHBOARD */
+        .gfs-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 15px; }
+        .gfs-card {
+            background: #F0F9FF; border: 1px solid #BAE6FD; padding: 10px; border-radius: 8px;
+            display: flex; flex-direction: column; align-items: center; text-align: center;
+        }
+        .gfs-card i { font-size: 1.2rem; color: #0284C7; margin-bottom: 4px; }
+        .gfs-card .label { font-size: 0.75rem; color: #64748B; }
+        .gfs-card .value { font-size: 1rem; font-weight: 700; color: #0F172A; }
+
+        /* BUTTONS */
+        .btn {
+            width: 100%; padding: 12px; border: none; border-radius: 8px;
+            font-weight: 600; font-size: 0.9rem; cursor: pointer;
+            display: flex; justify-content: center; align-items: center; gap: 8px; transition: all 0.2s;
+        }
+        .btn-primary { background: var(--primary); color: white; }
+        .btn-accent { background: var(--accent); color: white; }
+        .btn:disabled { background: #CBD5E1; cursor: not-allowed; }
+        .btn:hover:not(:disabled) { opacity: 0.9; transform: translateY(-1px); }
+
+        /* PROGRESS BAR */
+        .progress-wrapper { text-align: center; padding: 10px; }
+        .progress-bg { height: 6px; background: #E2E8F0; border-radius: 3px; margin: 10px 0; overflow: hidden; }
+        .progress-fill {
+            height: 100%; width: 0%; background: var(--accent); border-radius: 3px; transition: width 0.3s ease;
+            background-image: linear-gradient(45deg,rgba(255,255,255,.15) 25%,transparent 25%,transparent 50%,rgba(255,255,255,.15) 50%,rgba(255,255,255,.15) 75%,transparent 75%,transparent);
+            background-size: 1rem 1rem; animation: progress-bar-stripes 1s linear infinite;
+        }
+        @keyframes progress-bar-stripes { from { background-position: 1rem 0; } to { background-position: 0 0; } }
+        .progress-step { font-size: 0.8rem; color: var(--text-light); font-weight: 500; }
+
+        /* POPUP & TABLE */
+        .leaflet-popup-content-wrapper { border-radius: 12px; padding: 0; overflow: hidden; box-shadow: 0 4px 15px rgba(0,0,0,0.15); }
+        .leaflet-popup-content { margin: 0; width: 240px !important; }
+        
+        .result-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; border-bottom: 1px solid #eee; padding-bottom: 10px; }
+        table { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+        th { text-align: left; color: #64748B; font-weight: 600; padding: 10px; background: #F8FAFC; position: sticky; top: 0; }
+        td { padding: 10px; border-bottom: 1px solid #F1F5F9; color: #334155; }
+
+        .alert { padding: 10px; border-radius: 8px; font-size: 0.85rem; margin-top: 10px; display: flex; gap: 8px; align-items: center; }
+        .alert-info { background: #EFF6FF; color: #1E40AF; border: 1px solid #DBEAFE; }
+        .alert-success { background: #F0FDF4; color: #166534; border: 1px solid #DCFCE7; }
+
+        .spinner { border: 2px solid #f3f3f3; border-top: 2px solid var(--accent); border-radius: 50%; width: 20px; height: 20px; animation: spin 1s linear infinite; margin: 0 auto; }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        /* CUSTOM STORM MARKER */
+        .storm-marker-label { background: white; padding: 2px 6px; border-radius: 4px; border: 1px solid #999; font-size: 11px; font-weight: bold; color: #D32F2F; white-space: nowrap; box-shadow: 0 2px 4px rgba(0,0,0,0.2); }
+
+        @media (max-width: 1024px) {
+            .layout { flex-direction: column; height: auto; overflow-y: auto; }
+            .sidebar { width: 100%; order: 2; }
+            .map-box { height: 500px; min-height: 500px; order: 1; }
+            .float-panel { width: 95%; bottom: 10px; padding: 15px; }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="top-bar">
+        <div class="logo"><h1><i class="ri-typhoon-fill" style="color: var(--accent)"></i> StormCast AI</h1></div>
+        <div class="status-bar">
+            <div class="status-tag"><div class="dot" id="dotServer"></div> Server</div>
+            <div class="status-tag"><div class="dot" id="dotModel"></div> AI Core</div>
+        </div>
+    </div>
+
+    <div class="layout">
+        
+        <div class="map-box">
+            <div id="map"></div>
+
+            <div class="history-panel" id="historyPanel">
+                <div class="history-toggle" onclick="toggleHistory()">
+                    <i class="ri-history-line" id="historyIcon"></i>
+                </div>
+                <div class="history-header">
+                    <div class="history-title"><i class="ri-time-line"></i> Lịch sử Dự đoán</div>
+                    <span style="font-size:0.7rem; color:#64748B; cursor:pointer" onclick="clearHistory()">Xóa</span>
+                </div>
+                <ul class="history-list" id="historyList">
+                    <li style="padding:20px; text-align:center; color:#94A3B8; font-size:0.8rem;">Chưa có dữ liệu</li>
+                </ul>
+            </div>
+
+            <div id="loadingPanel" class="float-panel">
+                <div class="progress-wrapper">
+                    <p style="font-weight: 600; color: var(--primary)">Đang xử lý dữ liệu...</p>
+                    <div class="progress-bg"><div class="progress-fill" id="progressBar"></div></div>
+                    <p class="progress-step" id="progressText">Đang kết nối...</p>
+                </div>
+            </div>
+
+            <div id="probResult" class="float-panel"></div>
+            <div id="trackResult" class="float-panel"></div>
+        </div>
+
+        <div class="sidebar">
+            <div class="sidebar-scroll">
+                <div class="section-title"><i class="ri-map-pin-line"></i> 1. Vị trí & Tọa độ</div>
+                <div class="input-group">
+                    <div class="input-field"><label>Vĩ độ (Lat)</label><input type="number" id="lat" placeholder="0.00" step="any"></div>
+                    <div class="input-field"><label>Kinh độ (Lon)</label><input type="number" id="lon" placeholder="0.00" step="any"></div>
+                </div>
+                <button id="btnProb" class="btn btn-primary"><i class="ri-search-eye-line"></i> Kiểm tra Xác suất</button>
+                <hr style="margin: 20px 0; border: 0; border-top: 1px solid #F1F5F9;">
+                <div class="section-title"><i class="ri-dashboard-line"></i> 2. Dữ liệu Môi trường (GFS)</div>
+                <div id="gfsDashboard" class="gfs-grid" style="display: none;">
+                    <div class="gfs-card"><i class="ri-windy-line"></i><span class="label">Tốc độ gió</span><span class="value"><span id="valWind">--</span> <small>kt</small></span></div>
+                    <div class="gfs-card"><i class="ri-speed-up-line"></i><span class="label">Áp suất</span><span class="value"><span id="valPres">--</span> <small>mb</small></span></div>
+                    <div class="gfs-card"><i class="ri-temp-hot-line"></i><span class="label">SST (Biển)</span><span class="value"><span id="valSST">--</span> <small>°C</small></span></div>
+                    <div class="gfs-card"><i class="ri-drop-line"></i><span class="label">Hơi nước</span><span class="value"><span id="valTCWV">--</span> <small>mm</small></span></div>
+                </div>
+                <input type="hidden" id="windSpeed"><input type="hidden" id="pressure"><input type="hidden" id="nature">
+                <div id="gfsAlert" class="alert alert-info"><i class="ri-information-fill"></i> Chọn vị trí trên bản đồ để lấy dữ liệu.</div>
+                <hr style="margin: 20px 0; border: 0; border-top: 1px solid #F1F5F9;">
+                <div class="section-title"><i class="ri-time-line"></i> 3. Thời gian Dự báo</div>
+                <div class="input-group">
+                    <div class="input-field"><label>Tháng</label><select id="month"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option><option value="10">10</option><option value="11">11</option><option value="12">12</option></select></div>
+                    <div class="input-field"><label>Giờ (UTC)</label><input type="number" id="hour" min="0" max="23"></div>
+                </div>
+                <button id="btnTrack" class="btn btn-accent" disabled><i class="ri-route-line"></i> Dự báo Quỹ đạo</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        // --- 1. KHỞI TẠO ---
+        const now = new Date();
+        document.getElementById('month').value = now.getMonth() + 1;
+        document.getElementById('hour').value = now.getUTCHours();
+
+        const map = L.map('map', { zoomControl: false }).setView([16.0, 108.0], 5);
+        L.control.zoom({ position: 'topright' }).addTo(map);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(map);
+
+        let marker, selectedLoc, progressTimer;
+        let historyData = []; 
+        
+        checkStatus();
+
+        // --- 2. CÁC HÀM XỬ LÝ LỊCH SỬ (CORE LOGIC) ---
+        
+        // Lưu thêm Month và Hour vào lịch sử
+        function addToHistory(lat, lon, prob) {
+            const item = {
+                lat: lat, 
+                lon: lon, 
+                prob: prob, 
+                month: parseInt(document.getElementById('month').value),
+                hour: parseInt(document.getElementById('hour').value),
+                time: new Date().toLocaleTimeString()
+            };
+            
+            historyData.unshift(item);
+            if(historyData.length > 20) historyData.pop();
+            renderHistory();
+            document.getElementById('historyPanel').classList.remove('collapsed');
+        }
+
+        function renderHistory() {
+            const list = document.getElementById('historyList');
+            if(historyData.length === 0) {
+                list.innerHTML = '<li style="padding:20px; text-align:center; color:#94A3B8; font-size:0.8rem;">Chưa có dữ liệu</li>';
+                return;
+            }
+
+            let html = '';
+            historyData.forEach((item, index) => {
+                const isHighRisk = item.prob >= 50;
+                const colorClass = isHighRisk ? 'prob-high' : 'prob-low';
+                const icon = isHighRisk ? '<i class="ri-alarm-warning-fill" style="color:#EF4444"></i>' : '<i class="ri-shield-check-fill" style="color:#10B981"></i>';
+                
+                // Thêm class active-history nếu muốn highlight
+                html += `
+                    <li class="history-item" onclick="focusLocation(${index})">
+                        <div class="h-row">
+                            <span class="h-coords"><i class="ri-map-pin-2-fill" style="color:#3B82F6"></i> ${item.lat.toFixed(2)}, ${item.lon.toFixed(2)}</span>
+                            <span class="h-prob ${colorClass}">${item.prob}% ${icon}</span>
+                        </div>
+                        <div class="h-time">
+                            <span>Tháng ${item.month}, ${item.hour}h</span> • ${item.time}
+                        </div>
+                    </li>
+                `;
+            });
+            list.innerHTML = html;
+        }
+
+        // HÀM XỬ LÝ KHI CLICK VÀO LỊCH SỬ
+        async function focusLocation(index) {
+            const item = historyData[index];
+            selectedLoc = L.latLng(item.lat, item.lon);
+            
+            // 1. Di chuyển bản đồ
+            map.setView(selectedLoc, 6);
+            
+            // 2. Điền lại form
+            updateInputs(selectedLoc);
+            document.getElementById('month').value = item.month;
+            document.getElementById('hour').value = item.hour;
+            
+            // 3. Hiển thị lại bảng xác suất (Tái tạo lại UI)
+            const probData = { success: true, probability: item.prob, alert: item.prob >= 50, lat: item.lat, lon: item.lon };
+            showProbResult(probData);
+
+            // 4. QUAN TRỌNG: Nếu nguy cơ cao, TỰ ĐỘNG CHẠY DỰ BÁO QUỸ ĐẠO
+            if (item.prob >= 50) {
+                // Gọi hàm chạy dự báo (tách riêng logic ra)
+                await runTrackPrediction(item.lat, item.lon, item.month, item.hour);
+            } else {
+                // Nếu an toàn thì chỉ load GFS để xem chơi
+                map.fireEvent('click', {latlng: selectedLoc});
+                document.getElementById('trackResult').classList.remove('show'); // Ẩn bảng track cũ nếu có
+            }
+        }
+
+        function toggleHistory() {
+            document.getElementById('historyPanel').classList.toggle('collapsed');
+        }
+        function clearHistory() { historyData = []; renderHistory(); }
+
+
+        // --- 3. HÀM CHẠY DỰ BÁO QUỸ ĐẠO (TÁCH RIÊNG ĐỂ TÁI SỬ DỤNG) ---
+        async function runTrackPrediction(lat, lon, month, hour) {
+            startProgress(["Khôi phục dữ liệu...", "Tìm bão tương tự...", "Dự báo quỹ đạo (GBDT)...", "Vẽ bản đồ & Bảng số liệu..."]);
+            
+            try {
+                const res = await fetch('/predict_track', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({
+                        lat: lat, 
+                        lon: lon,
+                        month: month,
+                        hour: hour
+                    })
+                });
+                const data = await res.json();
+                stopProgress();
+
+                if(data.error) return alert(data.error);
+                
+                // Cập nhật thông tin GFS mới nhất vào sidebar (vì hàm track trả về current data)
+                updateGFSDashboard({
+                    wind_speed: data.current.wind,
+                    pressure: data.current.pressure,
+                    nature: data.current.nature,
+                    sst: '--', tcwv: '--' // Track API không trả về sst/tcwv chi tiết, để trống
+                });
+                
+                // Hiển thị kết quả
+                showTrackResult(data);
+
+            } catch(e) { 
+                stopProgress(); 
+                console.error(e);
+                alert('Lỗi kết nối khi tải lại lịch sử.'); 
+            }
+        }
+
+
+        // --- 4. CÁC SỰ KIỆN GIAO DIỆN ---
+        
+        // Click bản đồ
+        map.on('click', async (e) => {
+            selectedLoc = e.latlng;
+            updateInputs(selectedLoc);
+            resetPanels(); // Ẩn hết bảng cũ
+
+            if (marker) map.removeLayer(marker);
+            marker = L.marker(selectedLoc).addTo(map)
+                .bindPopup(`<div style="text-align:center;padding:5px"><div class="spinner"></div><small style="color:#64748B">Đang tải GFS...</small></div>`)
+                .openPopup();
+
+            try {
+                const res = await fetch('/get_gfs_data', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({lat: selectedLoc.lat, lon: selectedLoc.lng})
+                });
+                const data = await res.json();
+                
+                if(data.success) {
+                    updateGFSDashboard(data.gfs);
+                    // Update Popup Code (Giữ nguyên như cũ)
+                    const popupContent = `
+                        <div style="font-family:'Inter'; min-width:220px;">
+                            <div style="background:#F8FAFC; padding:10px 12px; border-bottom:1px solid #E2E8F0; border-radius:8px 8px 0 0;">
+                                <h4 style="margin:0; color:#1E293B; font-size:13px; display:flex; align-items:center; gap:6px;">
+                                    <span style="color:#EF4444">📍</span> Vị trí chọn
+                                </h4>
+                                <div style="font-size:11px; color:#64748B; margin-top:4px; display:flex; justify-content:space-between;">
+                                    <span>Lat: <b>${selectedLoc.lat.toFixed(4)}</b></span>
+                                    <span>Lon: <b>${selectedLoc.lng.toFixed(4)}</b></span>
+                                </div>
+                            </div>
+                            <div style="padding:12px;">
+                                <table style="width:100%; font-size:13px; color:#475569; border-collapse:collapse;">
+                                    <tr><td>💨 Gió:</td><td style="text-align:right; font-weight:700; color:#1E293B;">${data.gfs.wind_speed} kt</td></tr>
+                                    <tr><td>⏱️ Áp suất:</td><td style="text-align:right; font-weight:700; color:#1E293B;">${data.gfs.pressure} mb</td></tr>
+                                    <tr><td>🌡️ SST:</td><td style="text-align:right; font-weight:700; color:#1E293B;">${data.gfs.sst} °C</td></tr>
+                                    <tr><td>💧 Hơi nước:</td><td style="text-align:right; font-weight:700; color:#1E293B;">${data.gfs.tcwv} mm</td></tr>
+                                </table>
+                            </div>
+                        </div>`;
+                    marker.setPopupContent(popupContent);
+                } else { marker.setPopupContent('❌ Lỗi GFS'); }
+            } catch(err) { console.error(err); }
+        });
+
+        // Nút Dự báo Xác suất
+        document.getElementById('btnProb').addEventListener('click', async () => {
+            if (!selectedLoc) return alert("Vui lòng chọn vị trí!");
+            startProgress(["Kết nối Server...", "Tải mô hình CNN...", "Phân tích vệ tinh...", "Hoàn tất!"]);
+            try {
+                const res = await fetch('/predict_prob', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({lat: selectedLoc.lat, lon: selectedLoc.lng})
+                });
+                const data = await res.json();
+                stopProgress();
+                if(data.success) {
+                    showProbResult(data);
+                    // LƯU VÀO LỊCH SỬ
+                    addToHistory(data.lat, data.lon, data.probability);
+                }
+                else alert(data.message);
+            } catch(e) { stopProgress(); alert(e); }
+        });
+
+        // Nút Dự báo Quỹ đạo (Gọi lại hàm chung)
+        document.getElementById('btnTrack').addEventListener('click', async () => {
+            const m = parseInt(document.getElementById('month').value);
+            const h = parseInt(document.getElementById('hour').value);
+            await runTrackPrediction(selectedLoc.lat, selectedLoc.lng, m, h);
+        });
+
+        // --- HELPER FUNCTIONS ---
+        function getStormRadius(wind) {
+            if (wind < 34) return 120000; else if (wind < 64) return 180000; else if (wind < 96) return 250000; else return 320000; 
+        }
+
+        function drawTrackOnMap(data) {
+            if (window.trackLayers) window.trackLayers.forEach(l => map.removeLayer(l));
+            window.trackLayers = [];
+
+            const allPoints = [{lat: data.current.lat, lon: data.current.lon, wind: data.current.wind, hours: 0, nature: data.current.nature}, ...data.forecasts];
+            const pathCoords = allPoints.map(p => [p.lat, p.lon]);
+
+            // 1. Vòng tròn vùng ảnh hưởng
+            allPoints.forEach(p => {
+                const circle = L.circle([p.lat, p.lon], {
+                    color: 'transparent', fillColor: '#76FF03', fillOpacity: 0.25, radius: getStormRadius(p.wind)
+                }).addTo(map);
+                window.trackLayers.push(circle);
+            });
+
+            // 2. Đường nối
+            const polyline = L.polyline(pathCoords, { color: '#EF4444', weight: 4, dashArray: '8, 8', opacity: 0.9 }).addTo(map);
+            window.trackLayers.push(polyline);
+
+            // 3. Tâm bão
+            allPoints.forEach(p => {
+                const icon = L.divIcon({
+                    className: 'custom-storm',
+                    html: `<div style="background:${p.hours===0?'#D32F2F':'#FF0000'}; width:14px; height:14px; border-radius:50%; border:2px solid white; box-shadow:0 2px 4px rgba(0,0,0,0.3); display:flex; align-items:center; justify-content:center; color:white; font-size:8px; font-weight:bold;">${p.hours===0?'L':''}</div>`,
+                    iconSize: [14,14], iconAnchor: [7,7]
+                });
+                const m = L.marker([p.lat, p.lon], {icon: icon}).addTo(map);
+                m.bindPopup(`<div style="text-align:center"><b style="color:#D32F2F">${p.hours===0?'HIỆN TẠI':'+'+p.hours+'h'}</b><br>${p.nature}<br>${p.wind} kt</div>`);
+                window.trackLayers.push(m);
+
+                if(p.hours >= 0) {
+                    const label = L.marker([p.lat, p.lon], {
+                        icon: L.divIcon({ className: 'time-label', html: `<span style="color:#0044CC; font-weight:bold; font-size:11px; text-shadow:1px 1px 0 #fff;">+${p.hours}h</span>`, iconSize: [40,20], iconAnchor: [-10, 18] })
+                    }).addTo(map);
+                    window.trackLayers.push(label);
+                }
+            });
+            map.fitBounds(polyline.getBounds().pad(0.2));
+        }
+
+        function updateInputs(loc) {
+            document.getElementById('lat').value = loc.lat.toFixed(4);
+            document.getElementById('lon').value = loc.lng.toFixed(4);
+        }
+
+        function updateGFSDashboard(gfs) {
+            document.getElementById('gfsDashboard').style.display = 'grid';
+            document.getElementById('valWind').textContent = gfs.wind_speed;
+            document.getElementById('valPres').textContent = gfs.pressure;
+            if(gfs.sst !== '--') document.getElementById('valSST').textContent = gfs.sst;
+            if(gfs.tcwv !== '--') document.getElementById('valTCWV').textContent = gfs.tcwv;
+            
+            document.getElementById('gfsAlert').className = 'alert alert-success';
+            document.getElementById('gfsAlert').innerHTML = '<i class="ri-check-double-line"></i> Đã nạp dữ liệu GFS.';
+        }
+
+        function showTrackResult(data) {
+            const div = document.getElementById('trackResult');
+            let html = `<div class="result-header"><h3>📍 Dự báo Quỹ đạo (24h)</h3><small>Cập nhật: ${new Date().toLocaleTimeString()}</small></div>
+                <div style="overflow-x:auto;"><table><thead><tr><th>Giờ</th><th>Vị trí</th><th>Gió</th><th>Cấp</th></tr></thead><tbody>`;
+            data.forecasts.forEach(f => {
+                html += `<tr><td><span style="background:#EFF6FF; color:#3B82F6; padding:2px 6px; border-radius:4px;">+${f.hours}h</span></td><td>${f.lat.toFixed(1)}, ${f.lon.toFixed(1)}</td><td><b>${f.wind}</b>kt</td><td><span style="font-weight:bold; color:${getNatureColor(f.nature)}">${f.nature}</span></td></tr>`;
+            });
+            html += '</tbody></table></div>';
+            div.innerHTML = html;
+            div.classList.add('show');
+            drawTrackOnMap(data);
+        }
+
+        function showProbResult(data) {
+            const div = document.getElementById('probResult');
+            const color = data.probability > 50 ? '#EF4444' : '#10B981';
+            const status = data.alert ? 'NGUY CƠ CAO' : 'AN TOÀN';
+            div.innerHTML = `<div class="result-header"><h3 style="color:${color}">${status}</h3><span style="font-size:2rem; font-weight:800; color:${color}">${data.probability}%</span></div><p style="color:#64748B; font-size:0.9rem;">Tại tọa độ: ${data.lat.toFixed(2)}, ${data.lon.toFixed(2)}</p>`;
+            div.classList.add('show');
+            
+            const btn = document.getElementById('btnTrack');
+            if(data.alert) { btn.disabled = false; btn.innerHTML = '<i class="ri-route-line"></i> Chạy Dự Báo Quỹ Đạo'; }
+            else { btn.disabled = true; }
+        }
+
+        function resetPanels() { ['probResult', 'trackResult', 'loadingPanel'].forEach(id => document.getElementById(id).classList.remove('show')); }
+        function startProgress(steps) {
+            resetPanels(); document.getElementById('loadingPanel').classList.add('show');
+            const bar = document.getElementById('progressBar'), text = document.getElementById('progressText');
+            let p = 0; bar.style.width = '0%';
+            if(progressTimer) clearInterval(progressTimer);
+            progressTimer = setInterval(() => { p += Math.random()*5; if(p>90) p=90; bar.style.width=p+'%'; const idx=Math.floor((p/100)*steps.length); if(steps[idx]) text.textContent=steps[idx]; }, 200);
+        }
+        function stopProgress() { clearInterval(progressTimer); document.getElementById('progressBar').style.width='100%'; setTimeout(() => document.getElementById('loadingPanel').classList.remove('show'), 500); }
+        function getNatureColor(n) { if(n==='TD') return '#FBBF24'; if(n==='TS') return '#F97316'; if(n.includes('TY')||n==='STY') return '#EF4444'; return '#64748B'; }
+        async function checkStatus() { try { await fetch('/status'); document.getElementById('dotServer').classList.add('active'); document.getElementById('dotModel').classList.add('active'); } catch {} }
+
+        // SEARCH
+        document.getElementById('searchInput').addEventListener('keypress', function(e) { if (e.key === 'Enter') searchLocation(); });
+        async function searchLocation() {
+            const query = document.getElementById('searchInput').value.trim();
+            if (!query) return;
+            const coords = query.split(',').map(n => parseFloat(n));
+            if (coords.length === 2 && !isNaN(coords[0]) && !isNaN(coords[1])) {
+                map.setView([coords[0], coords[1]], 6);
+                map.fireEvent('click', {latlng: L.latLng(coords[0], coords[1])});
+                return;
+            }
+            try {
+                const res = await fetch(`https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}`);
+                const data = await res.json();
+                if (data && data.length > 0) {
+                    const lat = parseFloat(data[0].lat), lon = parseFloat(data[0].lon);
+                    map.setView([lat, lon], 6);
+                    map.fireEvent('click', {latlng: L.latLng(lat, lon)});
+                } else alert('Không tìm thấy địa điểm.');
+            } catch (e) { alert('Lỗi tìm kiếm: ' + e); }
+        }
+    </script>
+</body>
+</html>
